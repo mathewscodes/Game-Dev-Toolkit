@@ -1,0 +1,239 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<title>Mapeador de Slots Poké Stream</title>
+<style>
+  body {
+    font-family: sans-serif;
+    background: #222;
+    color: white;
+    margin: 0;
+    display: flex;
+    height: 100vh;
+  }
+  
+  #sidebar {
+    width: 300px;
+    background: #333;
+    padding: 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    border-right: 1px solid #555;
+    z-index: 10;
+    box-shadow: 2px 0 10px rgba(0,0,0,0.5);
+  }
+
+  #map-wrapper {
+    flex: 1;
+    overflow: auto;
+    position: relative;
+    cursor: crosshair;
+    background-color: #0a2e4f;
+  }
+
+  /* O Mapa Gigante */
+  #map-image {
+    display: block;
+    /* Garante que renderize pixelado/nítido */
+    image-rendering: pixelated; 
+  }
+
+  /* O cursor do slot (hover) */
+  #cursor-box {
+    position: absolute;
+    width: 50px;  /* SEU SLOT_SIZE */
+    height: 50px; /* SEU SLOT_SIZE */
+    border: 2px solid yellow;
+    background-color: rgba(255, 255, 0, 0.3);
+    pointer-events: none;
+    display: none;
+    box-sizing: border-box;
+  }
+
+  /* Marcadores de slots já clicados */
+  .marker {
+    position: absolute;
+    width: 50px;
+    height: 50px;
+    background-color: rgba(0, 255, 0, 0.4);
+    border: 1px solid lime;
+    box-sizing: border-box;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 10px;
+    color: white;
+    pointer-events: none;
+  }
+
+  textarea {
+    width: 100%;
+    height: 150px;
+    background: #111;
+    color: #0f0;
+    border: 1px solid #555;
+    font-family: monospace;
+    font-size: 12px;
+    resize: vertical;
+  }
+
+  .info-box {
+    background: #444;
+    padding: 10px;
+    border-radius: 5px;
+    font-size: 14px;
+  }
+  
+  button {
+    padding: 10px;
+    cursor: pointer;
+    background: #e63946;
+    color: white;
+    border: none;
+    border-radius: 4px;
+    font-weight: bold;
+  }
+  button:hover { background: #ff6b6b; }
+
+  select { padding: 5px; background: #fff; color: #000; }
+</style>
+</head>
+<body>
+
+<div id="sidebar">
+  <h2>Mapeador</h2>
+  
+  <div class="info-box">
+    <strong>Slot Atual:</strong><br>
+    X (Col): <span id="lbl-col">--</span><br>
+    Y (Lin): <span id="lbl-row">--</span><br>
+    <strong>ID: <span id="lbl-id" style="color:yellow">--</span></strong>
+  </div>
+
+  <label>Tipo de Terreno:</label>
+  <select id="terrain-type">
+    <option value="land">Terra (Land)</option>
+    <option value="water">Água (Water)</option>
+    <option value="forest">Floresta (Forest)</option>
+    <option value="urban">Urbano (Urban)</option>
+    <option value="high">Alto (High)</option>
+    <option value="coastal">Praia (Coastal)</option>
+    <option value="ocean">Oceano (Ocean)</option>
+    <option value="structure">Estrutura (PokéStop)</option>
+  </select>
+
+  <button onclick="copiarOutput()">Copiar Código PHP</button>
+  
+  <textarea id="output" readonly placeholder="Clique no mapa para gerar o código..."></textarea>
+  
+  <button onclick="limparUltimo()" style="background:#555">Desfazer Último</button>
+</div>
+
+<div id="map-wrapper">
+  <div id="cursor-box"></div>
+  <img id="map-image" src="assets/grid_map.png" alt="Mapa">
+</div>
+
+<script>
+  // ================= CONFIGURAÇÕES =================
+  const SLOT_SIZE = 50;   // Tamanho do Slot em Pixels
+  const MAP_WIDTH = 3600; // Largura Total da Imagem
+  const COLS = 72;        // 3600 / 50
+  // =================================================
+
+  const mapWrapper = document.getElementById('map-wrapper');
+  const cursorBox = document.getElementById('cursor-box');
+  const output = document.getElementById('output');
+  const terrainSelect = document.getElementById('terrain-type');
+  
+  let markers = [];
+
+  mapWrapper.addEventListener('mousemove', (e) => {
+    // Pega a posição do mouse relativa à imagem
+    const rect = mapWrapper.getBoundingClientRect();
+    const scrollLeft = mapWrapper.scrollLeft;
+    const scrollTop = mapWrapper.scrollTop;
+    
+    let x = e.clientX - rect.left + scrollLeft;
+    let y = e.clientY - rect.top + scrollTop;
+
+    // Arredonda para o Slot mais próximo (Snap to Grid)
+    const col = Math.floor(x / SLOT_SIZE);
+    const row = Math.floor(y / SLOT_SIZE);
+
+    // Limites
+    if (col < 0 || row < 0) return;
+
+    // Atualiza visual do cursor
+    const snapX = col * SLOT_SIZE;
+    const snapY = row * SLOT_SIZE;
+
+    cursorBox.style.display = 'block';
+    cursorBox.style.left = snapX + 'px';
+    cursorBox.style.top = snapY + 'px';
+
+    // Calcula ID
+    const id = (row * COLS) + col + 1;
+
+    // Atualiza Info
+    document.getElementById('lbl-col').innerText = col;
+    document.getElementById('lbl-row').innerText = row;
+    document.getElementById('lbl-id').innerText = id;
+  });
+
+  mapWrapper.addEventListener('click', () => {
+    const col = document.getElementById('lbl-col').innerText;
+    const row = document.getElementById('lbl-row').innerText;
+    const id = document.getElementById('lbl-id').innerText;
+    const type = terrainSelect.value;
+
+    if (col === '--') return;
+
+    // Gera a linha PHP
+    const phpLine = `['c' => ${col}, 'r' => ${row}, 'type' => '${type}'], // ID ${id}\n`;
+
+    // Adiciona ao textarea
+    output.value += phpLine;
+    output.scrollTop = output.scrollHeight; // Rola para baixo
+
+    // Adiciona marcador visual no mapa
+    addMarker(col, row, id);
+  });
+
+  function addMarker(c, r, id) {
+    const marker = document.createElement('div');
+    marker.className = 'marker';
+    marker.style.left = (c * SLOT_SIZE) + 'px';
+    marker.style.top = (r * SLOT_SIZE) + 'px';
+    marker.innerText = id;
+    
+    // Cores por tipo (opcional, visual)
+    if (terrainSelect.value === 'water') marker.style.borderColor = 'cyan';
+    if (terrainSelect.value === 'structure') marker.style.backgroundColor = 'rgba(255,0,255,0.5)';
+
+    mapWrapper.appendChild(marker);
+    markers.push(marker);
+  }
+
+  function limparUltimo() {
+    // Remove a última linha do textarea
+    const lines = output.value.trim().split('\n');
+    lines.pop();
+    output.value = lines.join('\n') + (lines.length > 0 ? '\n' : '');
+
+    // Remove o último marcador visual
+    const lastMarker = markers.pop();
+    if (lastMarker) lastMarker.remove();
+  }
+
+  function copiarOutput() {
+    output.select();
+    document.execCommand('copy');
+    alert("Código copiado! Cole no seu config_maps.php");
+  }
+</script>
+
+</body>
+</html>
